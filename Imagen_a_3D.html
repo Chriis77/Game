@@ -18,7 +18,7 @@ header p{margin:4px 0 0;color:var(--mut);font-size:13px}
 @media(min-width:860px){#view{aspect-ratio:auto;height:640px;max-height:none}}
 #view canvas{display:block;width:100%;height:100%}
 #stats{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--mut)}
-#thumb{position:absolute;right:10px;top:10px;width:64px;height:64px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#0008}
+#thumb{position:absolute;right:10px;top:10px;width:84px;height:84px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#fff repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/12px 12px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:14px}
 .file{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border:1.5px dashed #3a4152;border-radius:12px;cursor:pointer;font-weight:600}
 .file:hover{border-color:var(--acc)}
@@ -65,6 +65,7 @@ input[type=range]{width:100%;accent-color:var(--acc)}
     <div class="row"><label>Altura <b id="vHeight"></b></label><input type="range" id="height" min="1" max="40" step="0.5" value="10"></div>
     <div class="row" id="rowBase"><label>Grosor de la base <b id="vBase"></b></label><input type="range" id="base" min="0" max="10" step="0.5" value="2"></div>
     <div class="row hide" id="rowDetail"><label>Detalle de superficie <b id="vDetail"></b></label><input type="range" id="detail" min="0" max="10" step="0.5" value="2"></div>
+    <div class="row hide" id="rowParts"><label>Volumen por partes <b id="vParts"></b></label><input type="range" id="parts" min="0" max="10" step="1" value="5"></div>
     <div class="row"><label>Suavizado <b id="vSmooth"></b></label><input type="range" id="smooth" min="0" max="8" step="1" value="2"></div>
     <div class="row"><label>Resolución <b id="vRes"></b></label><input type="range" id="res" min="48" max="256" step="16" value="160"></div>
 
@@ -97,7 +98,7 @@ function loadFile(f){
   msg.textContent='Cargando '+(f.name||'imagen')+'…';
   const fr=new FileReader();
   fr.onload=()=>{const img=new Image();
-    img.onload=()=>{try{setImage(img);msg.textContent='Imagen cargada ✔';}catch(e){showErr('Error al procesar: '+e.message);}};
+    img.onload=()=>{try{$('removeBg').checked=true;$('rowTol').classList.remove('hide');if(mode!=='inflate')setMode('inflate');setImage(img);msg.textContent='Imagen cargada ✔ — modo Volumen. La miniatura muestra lo que se ha recortado.';}catch(e){showErr('Error al procesar: '+e.message);}};
     img.onerror=()=>showErr('Tu móvil no pudo leer ese formato (¿HEIC?). Prueba con una captura de pantalla o un JPG/PNG.');
     img.src=fr.result;};
   fr.onerror=()=>showErr('No se pudo leer el archivo.');
@@ -141,7 +142,6 @@ function setImage(img){
   const c=document.createElement('canvas'); c.width=W; c.height=H;
   const g=c.getContext('2d'); g.drawImage(img,0,0,W,H);
   src={img,W,H,data:g.getImageData(0,0,W,H).data};
-  $('thumb').src=c.toDataURL();
   schedule();
 }
 view.addEventListener('dragover',e=>e.preventDefault());
@@ -196,10 +196,30 @@ function build(){
     const r=data[i*4],g=data[i*4+1],b=data[i*4+2],a=data[i*4+3]/255;
     let l=(0.2126*r+0.7152*g+0.0722*b)/255; l=l*a+(1-a)*(inv?1:0);
     lum[i]=inv?1-l:l;
-    let m=a>0.5;
-    if(m&&rmBg&&!hasAlpha){const dr=r-br,dg=g-bg,db=b-bb;m=Math.sqrt(dr*dr+dg*dg+db*db)>tol;}
-    mask[i]=m?1:0;
+    mask[i]=a>0.5?1:0;
   }
+  if(rmBg&&!hasAlpha){
+    // background = everything connected to the image border with a colour close to the corners
+    const isBg=new Uint8Array(N), st=[];
+    const near=i=>{const dr=data[i*4]-br,dg=data[i*4+1]-bg,db=data[i*4+2]-bb;return Math.sqrt(dr*dr+dg*dg+db*db)<=tol;};
+    const push=i=>{if(!isBg[i]&&near(i)){isBg[i]=1;st.push(i);}};
+    for(let x=0;x<W;x++){push(x);push((H-1)*W+x);}
+    for(let y=0;y<H;y++){push(y*W);push(y*W+W-1);}
+    while(st.length){const i=st.pop(),x=i%W,y=(i-x)/W;
+      if(x>0)push(i-1);if(x<W-1)push(i+1);if(y>0)push(i-W);if(y<H-1)push(i+W);}
+    for(let i=0;i<N;i++) if(isBg[i]) mask[i]=0;
+  }
+  // keep only the largest connected object (drops specks)
+  {const lab=new Int32Array(N);let best=0,bestL=0,L=0;
+   for(let i0=0;i0<N;i0++){if(!mask[i0]||lab[i0])continue;L++;let c=0;const st=[i0];lab[i0]=L;
+     while(st.length){const i=st.pop(),x=i%W;c++;
+       for(const j of [x>0?i-1:-1,x<W-1?i+1:-1,i-W,i+W]) if(j>=0&&j<N&&mask[j]&&!lab[j]){lab[j]=L;st.push(j);}}
+     if(c>best){best=c;bestL=L;}}
+   if(best>N*0.002) for(let i=0;i<N;i++) if(lab[i]!==bestL) mask[i]=0;}
+  // preview of what was detected
+  {const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d'),im=g.createImageData(W,H);
+   for(let i=0;i<N;i++){im.data[i*4]=data[i*4];im.data[i*4+1]=data[i*4+1];im.data[i*4+2]=data[i*4+2];im.data[i*4+3]=(mode==='relief'&&!rmBg)||mask[i]?255:0;}
+   g.putImageData(im,0,0);$('thumb').src=c.toDataURL();}
 
   const zTop=new Float32Array(N), zBot=new Float32Array(N);
   let keep=null, walls=false;
@@ -215,8 +235,22 @@ function build(){
     let cnt=0; for(let i=0;i<N;i++)cnt+=mask[i];
     if(cnt<10){msg.textContent='No se detectó ningún objeto: activa "Quitar fondo" o baja la tolerancia.';}
     const d=distance(mask,W,H); let R=0; for(let i=0;i<N;i++) if(d[i]>R)R=d[i];
-    const dome=new Float32Array(N);
+    const dome=new Float32Array(N); R=Math.max(R,1);
     for(let i=0;i<N;i++){const t=Math.min(d[i]/R,1);dome[i]=mask[i]?Math.sqrt(1-(1-t)*(1-t)):0;}
+    // each part separated by outlines / colour edges gets its own bulge
+    const parts=+$('parts').value/10;
+    if(parts>0){
+      const lb1=lum.slice(); blur(lb1,W,H,1);
+      const inner=new Uint8Array(N);
+      for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;if(!mask[i])continue;
+        const gx=lb1[i+1-W]+2*lb1[i+1]+lb1[i+1+W]-lb1[i-1-W]-2*lb1[i-1]-lb1[i-1+W];
+        const gy=lb1[i+W-1]+2*lb1[i+W]+lb1[i+W+1]-lb1[i-W-1]-2*lb1[i-W]-lb1[i-W+1];
+        let cg=0;for(const j of [i+1,i+W]){const dr=data[i*4]-data[j*4],dg=data[i*4+1]-data[j*4+1],db=data[i*4+2]-data[j*4+2];cg=Math.max(cg,Math.sqrt(dr*dr+dg*dg+db*db)/255);}
+        inner[i]=(Math.hypot(gx,gy)>0.35||cg>0.25)?0:1;}
+      const dl=distance(inner,W,H);let Rl=0;for(let i=0;i<N;i++) if(dl[i]>Rl)Rl=dl[i];Rl=Math.max(2,Rl*0.6);
+      for(let i=0;i<N;i++){if(!mask[i])continue;const t=Math.min(dl[i]/Rl,1),loc=Math.sqrt(1-(1-t)*(1-t));
+        dome[i]=dome[i]*(1-parts*0.45)+loc*parts*0.45*Math.min(1,dome[i]*2.5);}
+    }
     blur(dome,W,H,Math.max(1,Math.floor(sm/2)));
     const lb=lum.slice(); blur(lb,W,H,sm);
     for(let i=0;i<N;i++){
@@ -269,19 +303,21 @@ let timer=0;
 function schedule(){clearTimeout(timer);timer=setTimeout(build,40);}
 
 // ---------- UI ----------
-const labels={height:['vHeight',v=>v+' mm'],base:['vBase',v=>v+' mm'],detail:['vDetail',v=>v+' mm'],smooth:['vSmooth',v=>v],res:['vRes',v=>v+' px'],tol:['vTol',v=>v]};
+const labels={height:['vHeight',v=>v+' mm'],base:['vBase',v=>v+' mm'],detail:['vDetail',v=>v+' mm'],smooth:['vSmooth',v=>v],res:['vRes',v=>v+' px'],tol:['vTol',v=>v],parts:['vParts',v=>v]};
 for(const k in labels){const el=$(k),[lid,f]=labels[k];const up=()=>$(lid).textContent=f(el.value);up();
   el.addEventListener('input',()=>{up(); if(k==='res'&&src) setImage(src.img); else schedule();});}
 $('invert').onchange=schedule;
 $('removeBg').onchange=()=>{$('rowTol').classList.toggle('hide',!$('removeBg').checked);schedule();};
 $('useColor').onchange=applyColor;
 
+const heightByMode={relief:10,inflate:25};
 function setMode(m){
+  if(m!==mode){heightByMode[mode]=+$('height').value;$('height').value=heightByMode[m];$('height').dispatchEvent(new Event('input'));}
   mode=m;
   document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
   const inf=m==='inflate';
   $('rowBase').classList.toggle('hide',inf); $('rowInvert').classList.toggle('hide',inf);
-  $('rowDetail').classList.toggle('hide',!inf);
+  $('rowDetail').classList.toggle('hide',!inf);$('rowParts').classList.toggle('hide',!inf);
   $('modeHint').textContent=inf
     ?'Separa el objeto del fondo y lo "infla" en un volumen cerrado con frente y espalda. Ideal para dibujos, logos y figuras sobre fondo liso.'
     :'La claridad de cada píxel se convierte en altura. Ideal para placas, litofanías y logos.';
@@ -333,10 +369,24 @@ function zip(files){
   return new Blob([...parts,...cd,new Uint8Array(e.buffer)]);
 }
 
-let downloads=null;
-if(window.claude&&claude.use){claude.use('downloads').then(d=>{downloads=d;}).catch(()=>{});}
+let dlPromise=null;
+function getDownloads(){
+  // window.claude may be injected after this script runs: wait for it, then ask for the capability
+  if(!dlPromise) dlPromise=new Promise(res=>{
+    let tries=0;
+    (function poll(){
+      if(window.claude&&typeof window.claude.use==='function'){
+        window.claude.use('downloads').then(d=>{if(!d)dlPromise=null;res(d);}).catch(()=>{dlPromise=null;res(null);});
+      }else if(tries++<40){setTimeout(poll,250);}else{dlPromise=null;res(null);}
+    })();
+  });
+  return dlPromise;
+}
+getDownloads();
 async function save(filename,data){
-  if(!downloads){msg.textContent='La descarga no está disponible en esta vista. Abre la app en claude.ai para descargar.';return;}
+  msg.textContent='Preparando descarga…';
+  const downloads=await getDownloads();
+  if(!downloads){msg.textContent='Tu app no permite descargas desde esta vista. Prueba a abrir el enlace de la app en el navegador (Chrome/Safari) o en claude.ai.';return;}
   try{await downloads.save({filename,data});msg.textContent='Listo: '+filename;}
   catch(err){msg.textContent=err&&err.code==='declined'?'Descarga cancelada.':'No se pudo descargar ('+(err&&err.code||'error')+').';}
 }
