@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Imagen a 3D</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--txt:#e8eaf0;--mut:#8a92a6;--acc:#ff7a45}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:16px 16px 8px}
+h1{margin:0;font-size:20px;letter-spacing:-.01em}
+h1 span{color:var(--acc)}
+header p{margin:4px 0 0;color:var(--mut);font-size:13px}
+.wrap{display:grid;gap:12px;padding:0 12px 20px;max-width:1100px;margin:0 auto}
+@media(min-width:860px){.wrap{grid-template-columns:1fr 340px}}
+#view{position:relative;background:radial-gradient(circle at 50% 35%,#232836,#0b0d11);border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:1/1;max-height:70vh;width:100%;touch-action:none}
+@media(min-width:860px){#view{aspect-ratio:auto;height:640px;max-height:none}}
+#view canvas{display:block;width:100%;height:100%}
+#stats{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--mut)}
+#thumb{position:absolute;right:10px;top:10px;width:84px;height:84px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#fff repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/12px 12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:14px}
+.file{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border:1.5px dashed #3a4152;border-radius:12px;cursor:pointer;font-weight:600}
+.file:hover{border-color:var(--acc)}
+.file,.upTop{position:relative;overflow:hidden}
+.file input,.upTop input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:100px}
+.upTop{position:absolute;left:10px;top:10px;z-index:5;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;background:var(--acc);color:#140a05;font-weight:700;font-size:14px;box-shadow:0 4px 14px #0006}
+#paste{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:#0f1115;color:var(--mut);padding:10px;font:inherit;font-size:13px;resize:none}
+#err{display:none;background:#3a1418;color:#ffb4b4;border-radius:10px;padding:10px;font-size:12px;white-space:pre-wrap}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:#0f1115;border-radius:10px;padding:3px}
+.seg button{background:none;border:0;color:var(--mut);padding:9px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--acc);color:#140a05}
+.hint{font-size:12px;color:var(--mut);margin-top:-6px}
+.row label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+.row label b{font-weight:500;color:var(--mut)}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px}
+.chk input{accent-color:var(--acc);width:18px;height:18px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{padding:12px;border-radius:10px;border:1px solid var(--line);background:#1f232c;color:var(--txt);font:inherit;font-weight:600;cursor:pointer}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#140a05}
+.btn:disabled{opacity:.4;cursor:default}
+#msg{font-size:12px;color:var(--mut);min-height:16px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>Imagen <span>→</span> 3D</h1>
+  <p>Sube una foto o dibujo y conviértelo en un modelo 3D imprimible (STL / OBJ).</p>
+</header>
+<div class="wrap">
+  <div id="view"><div class="upTop">📷 Subir imagen<input type="file" accept="image/*" id="file2"></div><img id="thumb" alt=""><div id="stats"></div></div>
+  <section class="panel">
+    <div class="file">📷 Elegir imagen de la galería<input type="file" accept="image/*" id="file"></div>
+    <textarea id="paste" placeholder="¿No se abre la galería? Copia una foto y mantén pulsado aquí para pegarla"></textarea>
+    <div id="err"></div>
+
+    <div class="seg" id="mode">
+      <button data-m="relief" class="on">Relieve</button>
+      <button data-m="inflate">Volumen</button>
+    </div>
+    <div class="hint" id="modeHint">La claridad de cada píxel se convierte en altura. Ideal para placas, litofanías y logos.</div>
+
+    <div class="row"><label>Altura <b id="vHeight"></b></label><input type="range" id="height" min="1" max="40" step="0.5" value="10"></div>
+    <div class="row" id="rowBase"><label>Grosor de la base <b id="vBase"></b></label><input type="range" id="base" min="0" max="10" step="0.5" value="2"></div>
+    <div class="row hide" id="rowDetail"><label>Detalle de superficie <b id="vDetail"></b></label><input type="range" id="detail" min="0" max="10" step="0.5" value="2"></div>
+    <div class="row hide" id="rowParts"><label>Volumen por partes <b id="vParts"></b></label><input type="range" id="parts" min="0" max="10" step="1" value="5"></div>
+    <div class="row"><label>Suavizado <b id="vSmooth"></b></label><input type="range" id="smooth" min="0" max="8" step="1" value="2"></div>
+    <div class="row"><label>Resolución <b id="vRes"></b></label><input type="range" id="res" min="48" max="256" step="16" value="160"></div>
+
+    <label class="chk" id="rowInvert"><input type="checkbox" id="invert"> Invertir (oscuro = alto, para litofanías)</label>
+    <label class="chk" id="rowBg"><input type="checkbox" id="removeBg"> Quitar fondo</label>
+    <div class="row hide" id="rowTol"><label>Tolerancia del fondo <b id="vTol"></b></label><input type="range" id="tol" min="5" max="200" step="1" value="60"></div>
+    <label class="chk"><input type="checkbox" id="useColor" checked> Mostrar colores de la imagen</label>
+
+    <div class="btns">
+      <button class="btn pri" id="dl">⬇ Descargar 3D</button>
+      <button class="btn" id="shot">🖼 Captura PNG</button>
+    </div>
+    <div id="msg">El ZIP incluye .stl (impresión 3D) y .obj con color (Blender, etc.). Medidas en mm, 100 mm de ancho.</div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+window.addEventListener('error',e=>{const b=document.getElementById('err');if(b){b.style.display='block';b.textContent='Error: '+(e.message||e);}});
+</script>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const view=$('view'), msg=$('msg');
+let mode='relief', src=null, mesh=null, geo=null;
+function showErr(t){const b=$('err');b.style.display='block';b.textContent=t;}
+function loadFile(f){
+  if(!f){msg.textContent='No se recibió ninguna imagen.';return;}
+  msg.textContent='Cargando '+(f.name||'imagen')+'…';
+  const fr=new FileReader();
+  fr.onload=()=>{const img=new Image();
+    img.onload=()=>{try{$('removeBg').checked=true;$('rowTol').classList.remove('hide');if(mode!=='inflate')setMode('inflate');setImage(img);msg.textContent='Imagen cargada ✔ — modo Volumen. La miniatura muestra lo que se ha recortado.';}catch(e){showErr('Error al procesar: '+e.message);}};
+    img.onerror=()=>showErr('Tu móvil no pudo leer ese formato (¿HEIC?). Prueba con una captura de pantalla o un JPG/PNG.');
+    img.src=fr.result;};
+  fr.onerror=()=>showErr('No se pudo leer el archivo.');
+  fr.readAsDataURL(f);
+}
+for(const id of ['file','file2']){const inp=$(id);
+  const h=e=>{const f=e.target.files&&e.target.files[0];if(f){loadFile(f);} e.target.value='';};
+  inp.addEventListener('change',h);inp.addEventListener('input',h);}
+$('paste').addEventListener('paste',e=>{
+  const items=(e.clipboardData||{}).items||[];
+  for(const it of items){if(it.type&&it.type.startsWith('image/')){e.preventDefault();loadFile(it.getAsFile());$('paste').value='';return;}}
+  setTimeout(()=>{$('paste').value='';},0);msg.textContent='Lo pegado no era una imagen.';
+});
+if(typeof THREE==='undefined'){showErr('No se pudo cargar el motor 3D (three.js). Revisa tu conexión y recarga.');return;}
+
+// ---------- Three.js ----------
+let renderer;
+try{renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true,alpha:true});}
+catch(e){showErr('Tu navegador no permite gráficos 3D (WebGL) aquí. Prueba a abrir la app en el navegador del móvil.');return;}
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+view.prepend(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(40,1,0.1,2000);
+camera.position.set(0,-90,150);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true; controls.target.set(0,0,0);
+scene.add(new THREE.HemisphereLight(0xffffff,0x334455,0.65));
+const key=new THREE.DirectionalLight(0xffffff,0.85); key.position.set(-60,80,120); scene.add(key);
+const rim=new THREE.DirectionalLight(0xffb38a,0.35); rim.position.set(80,-60,-80); scene.add(rim);
+const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.05,side:THREE.DoubleSide});
+const group=new THREE.Group(); scene.add(group);
+
+function resize(){const r=view.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(view); resize();
+(function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);})();
+
+// ---------- Image loading ----------
+function setImage(img){
+  const res=+$('res').value, s=res/Math.max(img.width,img.height);
+  const W=Math.max(8,Math.round(img.width*s)), H=Math.max(8,Math.round(img.height*s));
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d'); g.drawImage(img,0,0,W,H);
+  src={img,W,H,data:g.getImageData(0,0,W,H).data};
+  schedule();
+}
+view.addEventListener('dragover',e=>e.preventDefault());
+view.addEventListener('drop',e=>{e.preventDefault();loadFile(e.dataTransfer.files[0]);});
+
+// Demo image so the viewer isn't empty
+(function demo(){
+  const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+  g.fillStyle='#ffffff';g.fillRect(0,0,256,256);
+  g.save();g.translate(128,138);g.beginPath();
+  for(let t=0;t<=Math.PI*2;t+=0.02){const x=16*Math.pow(Math.sin(t),3),y=-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t));g.lineTo(x*6.4,y*6.4);}
+  const gr=g.createRadialGradient(-30,-40,10,0,0,120);gr.addColorStop(0,'#ff9a76');gr.addColorStop(1,'#d7263d');
+  g.fillStyle=gr;g.fill();g.restore();
+  const img=new Image();img.onload=()=>{setImage(img);$('removeBg').checked=true;$('rowTol').classList.remove('hide');setMode('inflate');};img.src=c.toDataURL();
+})();
+
+// ---------- Helpers ----------
+function blur(a,W,H,passes){
+  let t=new Float32Array(a.length);
+  for(let p=0;p<passes;p++){
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;t[i]=(a[i]*2+a[x>0?i-1:i]+a[x<W-1?i+1:i])/4;}
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;a[i]=(t[i]*2+t[y>0?i-W:i]+t[y<H-1?i+W:i])/4;}
+  }
+  return a;
+}
+function distance(mask,W,H){
+  const d=new Float32Array(W*H),INF=1e9,R2=Math.SQRT2;
+  for(let i=0;i<d.length;i++)d[i]=mask[i]?INF:0;
+  const g=(x,y)=>(x<0||y<0||x>=W||y>=H)?0:d[y*W+x];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!d[i])continue;
+    d[i]=Math.min(d[i],g(x-1,y)+1,g(x,y-1)+1,g(x-1,y-1)+R2,g(x+1,y-1)+R2);}
+  for(let y=H-1;y>=0;y--)for(let x=W-1;x>=0;x--){const i=y*W+x;if(!d[i])continue;
+    d[i]=Math.min(d[i],g(x+1,y)+1,g(x,y+1)+1,g(x+1,y+1)+R2,g(x-1,y+1)+R2);}
+  return d;
+}
+
+// ---------- Mesh building ----------
+function build(){
+  if(!src)return;
+  const {W,H,data}=src, N=W*H;
+  const height=+$('height').value, base=+$('base').value, detail=+$('detail').value;
+  const sm=+$('smooth').value, inv=$('invert').checked, rmBg=$('removeBg').checked, tol=+$('tol').value;
+
+  // luminance + background mask
+  const lum=new Float32Array(N), mask=new Uint8Array(N);
+  let br=0,bg=0,bb=0,n=0;
+  for(const [cx,cy] of [[0,0],[W-1,0],[0,H-1],[W-1,H-1]]){const i=(cy*W+cx)*4;br+=data[i];bg+=data[i+1];bb+=data[i+2];n++;}
+  br/=n;bg/=n;bb/=n;
+  let hasAlpha=false;
+  for(let i=0;i<N;i++) if(data[i*4+3]<250){hasAlpha=true;break;}
+  for(let i=0;i<N;i++){
+    const r=data[i*4],g=data[i*4+1],b=data[i*4+2],a=data[i*4+3]/255;
+    let l=(0.2126*r+0.7152*g+0.0722*b)/255; l=l*a+(1-a)*(inv?1:0);
+    lum[i]=inv?1-l:l;
+    mask[i]=a>0.5?1:0;
+  }
+  if(rmBg&&!hasAlpha){
+    // background = everything connected to the image border with a colour close to the corners
+    const isBg=new Uint8Array(N), st=[];
+    const near=i=>{const dr=data[i*4]-br,dg=data[i*4+1]-bg,db=data[i*4+2]-bb;return Math.sqrt(dr*dr+dg*dg+db*db)<=tol;};
+    const push=i=>{if(!isBg[i]&&near(i)){isBg[i]=1;st.push(i);}};
+    for(let x=0;x<W;x++){push(x);push((H-1)*W+x);}
+    for(let y=0;y<H;y++){push(y*W);push(y*W+W-1);}
+    while(st.length){const i=st.pop(),x=i%W,y=(i-x)/W;
+      if(x>0)push(i-1);if(x<W-1)push(i+1);if(y>0)push(i-W);if(y<H-1)push(i+W);}
+    for(let i=0;i<N;i++) if(isBg[i]) mask[i]=0;
+  }
+  // keep only the largest connected object (drops specks)
+  {const lab=new Int32Array(N);let best=0,bestL=0,L=0;
+   for(let i0=0;i0<N;i0++){if(!mask[i0]||lab[i0])continue;L++;let c=0;const st=[i0];lab[i0]=L;
+     while(st.length){const i=st.pop(),x=i%W;c++;
+       for(const j of [x>0?i-1:-1,x<W-1?i+1:-1,i-W,i+W]) if(j>=0&&j<N&&mask[j]&&!lab[j]){lab[j]=L;st.push(j);}}
+     if(c>best){best=c;bestL=L;}}
+   if(best>N*0.002) for(let i=0;i<N;i++) if(lab[i]!==bestL) mask[i]=0;}
+  // preview of what was detected
+  {const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d'),im=g.createImageData(W,H);
+   for(let i=0;i<N;i++){im.data[i*4]=data[i*4];im.data[i*4+1]=data[i*4+1];im.data[i*4+2]=data[i*4+2];im.data[i*4+3]=(mode==='relief'&&!rmBg)||mask[i]?255:0;}
+   g.putImageData(im,0,0);$('thumb').src=c.toDataURL();}
+
+  const zTop=new Float32Array(N), zBot=new Float32Array(N);
+  let keep=null, walls=false;
+  if(mode==='relief'){
+    const hm=lum.slice(); if(rmBg) for(let i=0;i<N;i++) hm[i]*=mask[i];
+    blur(hm,W,H,sm);
+    for(let i=0;i<N;i++){zTop[i]=base+hm[i]*height;zBot[i]=0;}
+    walls=true;
+  }else{
+    // clear border so the shell closes
+    for(let x=0;x<W;x++){mask[x]=0;mask[(H-1)*W+x]=0;}
+    for(let y=0;y<H;y++){mask[y*W]=0;mask[y*W+W-1]=0;}
+    let cnt=0; for(let i=0;i<N;i++)cnt+=mask[i];
+    if(cnt<10){msg.textContent='No se detectó ningún objeto: activa "Quitar fondo" o baja la tolerancia.';}
+    const d=distance(mask,W,H); let R=0; for(let i=0;i<N;i++) if(d[i]>R)R=d[i];
+    const dome=new Float32Array(N); R=Math.max(R,1);
+    for(let i=0;i<N;i++){const t=Math.min(d[i]/R,1);dome[i]=mask[i]?Math.sqrt(1-(1-t)*(1-t)):0;}
+    // each part separated by outlines / colour edges gets its own bulge
+    const parts=+$('parts').value/10;
+    if(parts>0){
+      const lb1=lum.slice(); blur(lb1,W,H,1);
+      const inner=new Uint8Array(N);
+      for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;if(!mask[i])continue;
+        const gx=lb1[i+1-W]+2*lb1[i+1]+lb1[i+1+W]-lb1[i-1-W]-2*lb1[i-1]-lb1[i-1+W];
+        const gy=lb1[i+W-1]+2*lb1[i+W]+lb1[i+W+1]-lb1[i-W-1]-2*lb1[i-W]-lb1[i-W+1];
+        let cg=0;for(const j of [i+1,i+W]){const dr=data[i*4]-data[j*4],dg=data[i*4+1]-data[j*4+1],db=data[i*4+2]-data[j*4+2];cg=Math.max(cg,Math.sqrt(dr*dr+dg*dg+db*db)/255);}
+        inner[i]=(Math.hypot(gx,gy)>0.35||cg>0.25)?0:1;}
+      const dl=distance(inner,W,H);let Rl=0;for(let i=0;i<N;i++) if(dl[i]>Rl)Rl=dl[i];Rl=Math.max(2,Rl*0.6);
+      for(let i=0;i<N;i++){if(!mask[i])continue;const t=Math.min(dl[i]/Rl,1),loc=Math.sqrt(1-(1-t)*(1-t));
+        dome[i]=dome[i]*(1-parts*0.45)+loc*parts*0.45*Math.min(1,dome[i]*2.5);}
+    }
+    blur(dome,W,H,Math.max(1,Math.floor(sm/2)));
+    const lb=lum.slice(); blur(lb,W,H,sm);
+    for(let i=0;i<N;i++){
+      if(!mask[i]){zTop[i]=zBot[i]=0;continue;}
+      zTop[i]=dome[i]*height+(lb[i]-0.5)*detail*Math.min(1,dome[i]*3);
+      zBot[i]=-dome[i]*height;
+    }
+    keep=(a,b,c,e)=>mask[a]|mask[b]|mask[c]|mask[e];
+  }
+
+  // geometry
+  const px=100/Math.max(W,H);
+  const pos=new Float32Array(N*2*3), col=new Float32Array(N*2*3);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x, X=(x-(W-1)/2)*px, Y=((H-1)/2-y)*px;
+    const r=data[i*4]/255,g=data[i*4+1]/255,b=data[i*4+2]/255;
+    pos.set([X,Y,zTop[i]],i*3); pos.set([X,Y,zBot[i]],(N+i)*3);
+    col.set([r,g,b],i*3); col.set([r,g,b],(N+i)*3);
+  }
+  const idx=[];
+  for(let y=0;y<H-1;y++)for(let x=0;x<W-1;x++){
+    const a=y*W+x,b=a+1,c=a+W,e=c+1;
+    if(keep&&!keep(a,b,c,e))continue;
+    idx.push(a,c,e, a,e,b, N+a,N+e,N+c, N+a,N+b,N+e);
+  }
+  if(walls){
+    const wall=(p,q)=>idx.push(p,q,N+q, p,N+q,N+p);
+    for(let x=0;x<W-1;x++)wall(x,x+1);
+    for(let y=0;y<H-1;y++)wall(y*W+W-1,(y+1)*W+W-1);
+    for(let x=W-1;x>0;x--)wall((H-1)*W+x,(H-1)*W+x-1);
+    for(let y=H-1;y>0;y--)wall(y*W,(y-1)*W);
+  }
+  if(geo)geo.dispose();
+  geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  geo.setIndex(N*2>65535?new THREE.Uint32BufferAttribute(idx,1):new THREE.Uint16BufferAttribute(idx,1));
+  geo.computeVertexNormals();
+  if(!mesh){mesh=new THREE.Mesh(geo,mat);group.add(mesh);}else mesh.geometry=geo;
+  applyColor();
+  const tris=idx.length/3, mm=(v)=>v.toFixed(0);
+  $('stats').textContent=`${tris.toLocaleString('es')} triángulos · ${mm(W*px)}×${mm(H*px)} mm`;
+}
+function applyColor(){
+  const on=$('useColor').checked;
+  mat.vertexColors=on; mat.color.set(on?0xffffff:0xd9dce3); mat.needsUpdate=true;
+}
+
+let timer=0;
+function schedule(){clearTimeout(timer);timer=setTimeout(build,40);}
+
+// ---------- UI ----------
+const labels={height:['vHeight',v=>v+' mm'],base:['vBase',v=>v+' mm'],detail:['vDetail',v=>v+' mm'],smooth:['vSmooth',v=>v],res:['vRes',v=>v+' px'],tol:['vTol',v=>v],parts:['vParts',v=>v]};
+for(const k in labels){const el=$(k),[lid,f]=labels[k];const up=()=>$(lid).textContent=f(el.value);up();
+  el.addEventListener('input',()=>{up(); if(k==='res'&&src) setImage(src.img); else schedule();});}
+$('invert').onchange=schedule;
+$('removeBg').onchange=()=>{$('rowTol').classList.toggle('hide',!$('removeBg').checked);schedule();};
+$('useColor').onchange=applyColor;
+
+const heightByMode={relief:10,inflate:25};
+function setMode(m){
+  if(m!==mode){heightByMode[mode]=+$('height').value;$('height').value=heightByMode[m];$('height').dispatchEvent(new Event('input'));}
+  mode=m;
+  document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+  const inf=m==='inflate';
+  $('rowBase').classList.toggle('hide',inf); $('rowInvert').classList.toggle('hide',inf);
+  $('rowDetail').classList.toggle('hide',!inf);$('rowParts').classList.toggle('hide',!inf);
+  $('modeHint').textContent=inf
+    ?'Separa el objeto del fondo y lo "infla" en un volumen cerrado con frente y espalda. Ideal para dibujos, logos y figuras sobre fondo liso.'
+    :'La claridad de cada píxel se convierte en altura. Ideal para placas, litofanías y logos.';
+  if(inf&&!$('removeBg').checked){$('removeBg').checked=true;$('rowTol').classList.remove('hide');}
+  schedule();
+}
+document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+
+// ---------- Export ----------
+function toSTL(){
+  const p=geo.attributes.position.array, ix=geo.index.array, T=ix.length/3;
+  const buf=new ArrayBuffer(84+T*50), dv=new DataView(buf);
+  const head='Imagen a 3D'; for(let i=0;i<head.length;i++)dv.setUint8(i,head.charCodeAt(i));
+  dv.setUint32(80,T,true); let o=84;
+  for(let t=0;t<T;t++){
+    const a=ix[t*3]*3,b=ix[t*3+1]*3,c=ix[t*3+2]*3;
+    const ux=p[b]-p[a],uy=p[b+1]-p[a+1],uz=p[b+2]-p[a+2],vx=p[c]-p[a],vy=p[c+1]-p[a+1],vz=p[c+2]-p[a+2];
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx; const l=Math.hypot(nx,ny,nz)||1;
+    dv.setFloat32(o,nx/l,true);dv.setFloat32(o+4,ny/l,true);dv.setFloat32(o+8,nz/l,true);o+=12;
+    for(const v of [a,b,c]){dv.setFloat32(o,p[v],true);dv.setFloat32(o+4,p[v+1],true);dv.setFloat32(o+8,p[v+2],true);o+=12;}
+    o+=2;
+  }
+  return new Uint8Array(buf);
+}
+function toOBJ(){
+  const p=geo.attributes.position.array, c=geo.attributes.color.array, ix=geo.index.array, out=['# Imagen a 3D (mm)'];
+  for(let i=0;i<p.length;i+=3) out.push(`v ${p[i].toFixed(3)} ${p[i+1].toFixed(3)} ${p[i+2].toFixed(3)} ${c[i].toFixed(3)} ${c[i+1].toFixed(3)} ${c[i+2].toFixed(3)}`);
+  for(let i=0;i<ix.length;i+=3) out.push(`f ${ix[i]+1} ${ix[i+1]+1} ${ix[i+2]+1}`);
+  return new TextEncoder().encode(out.join('\n'));
+}
+const crcT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=crcT[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zip(files){
+  const enc=new TextEncoder(),parts=[],cd=[];let off=0;
+  for(const f of files){
+    const nm=enc.encode(f.name),crc=crc32(f.data),sz=f.data.length;
+    const h=new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(12,0x21,true);
+    h.setUint32(14,crc,true);h.setUint32(18,sz,true);h.setUint32(22,sz,true);h.setUint16(26,nm.length,true);
+    parts.push(new Uint8Array(h.buffer),nm,f.data);
+    const c=new DataView(new ArrayBuffer(46));
+    c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(14,0x21,true);
+    c.setUint32(16,crc,true);c.setUint32(20,sz,true);c.setUint32(24,sz,true);c.setUint16(28,nm.length,true);c.setUint32(42,off,true);
+    cd.push(new Uint8Array(c.buffer),nm);
+    off+=30+nm.length+sz;
+  }
+  const cs=cd.reduce((s,a)=>s+a.length,0),e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cs,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cd,new Uint8Array(e.buffer)]);
+}
+
+let dlPromise=null;
+function getDownloads(){
+  // window.claude may be injected after this script runs: wait for it, then ask for the capability
+  if(!dlPromise) dlPromise=new Promise(res=>{
+    let tries=0;
+    (function poll(){
+      if(window.claude&&typeof window.claude.use==='function'){
+        window.claude.use('downloads').then(d=>{if(!d)dlPromise=null;res(d);}).catch(()=>{dlPromise=null;res(null);});
+      }else if(tries++<40){setTimeout(poll,250);}else{dlPromise=null;res(null);}
+    })();
+  });
+  return dlPromise;
+}
+getDownloads();
+async function save(filename,data){
+  msg.textContent='Preparando descarga…';
+  const downloads=await getDownloads();
+  if(!downloads){msg.textContent='Tu app no permite descargas desde esta vista. Prueba a abrir el enlace de la app en el navegador (Chrome/Safari) o en claude.ai.';return;}
+  try{await downloads.save({filename,data});msg.textContent='Listo: '+filename;}
+  catch(err){msg.textContent=err&&err.code==='declined'?'Descarga cancelada.':'No se pudo descargar ('+(err&&err.code||'error')+').';}
+}
+$('dl').onclick=()=>{
+  if(!geo)return; msg.textContent='Generando archivos…';
+  setTimeout(()=>{
+    const name='modelo_'+mode;
+    const readme=new TextEncoder().encode('Modelo generado con Imagen a 3D.\n- '+name+'.stl: para impresión 3D (unidades en mm).\n- '+name+'.obj: malla con colores por vértice (Blender, MeshLab).\n');
+    save(name+'.zip',zip([{name:name+'.stl',data:toSTL()},{name:name+'.obj',data:toOBJ()},{name:'LEEME.txt',data:readme}]));
+  },20);
+};
+$('shot').onclick=()=>{renderer.render(scene,camera);renderer.domElement.toBlob(b=>b&&save('vista_3d.png',b),'image/png');};
+})();
+</script>
+</body>
+</html>
